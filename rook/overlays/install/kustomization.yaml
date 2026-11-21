@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: rook-install-kustomization
+namespace: rook-ceph
+resources:
+- https://raw.githubusercontent.com/rook/rook/refs/tags/v1.21.2/deploy/examples/operator.yaml
+- https://raw.githubusercontent.com/rook/rook/refs/tags/v1.21.2/deploy/examples/cluster.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+
+patches:
+  - target:
+      kind: CephCluster
+      name: rook-ceph
+    patch: |-
+      # Upstream cluster.yaml leaves csi.cephfs with only commented-out keys, which
+      # parses as null and fails CRD validation ("must be of type object").
+      - op: replace
+        path: /spec/csi/cephfs
+        value: {}
+      - op: remove
+        path: /spec/security/cephx/csi
+      - op: add
+        path: /spec/security/cephx/allowedCiphers
+        value: ["aes256k"]
+      # Only consume the NVMe drive on each storage node (achilles, perseus, helen, aenes).
+      # Hercules has no data drive, so it gets no OSD.
+      - op: replace
+        path: /spec/storage/useAllDevices
+        value: false
+      - op: add
+        path: /spec/storage/deviceFilter
+        value: "^nvme0n1$"

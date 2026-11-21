@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: rook-kustomization
+namespace: rook-ceph
+resources:
+- ceph-block-pool.yaml
+- storage-class.yaml

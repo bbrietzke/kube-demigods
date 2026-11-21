@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: iscsi-prerequisites-kustomization
+# CSIDriver registration for iscsi.csi.k8s.io.
+# The driver has no releases past v0.1.0, so this is pinned to a commit on master (2026-11-06).
+resources:
+- https://raw.githubusercontent.com/kubernetes-csi/csi-driver-iscsi/ce838d03d752181cc05cbeef842681efa93ce995/deploy/csi-iscsi-driverinfo.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize

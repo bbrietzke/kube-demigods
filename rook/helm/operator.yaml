@@ -1,0 +1,10 @@
+# Values for the rook-ceph operator chart (https://charts.rook.io/release), pinned in ../Makefile.
+# Equivalent of overlays/prerequisites + operator.yaml from overlays/install.
+
+crds:
+  # The chart owns the Rook CRDs. Do not flip this off after the first install.
+  enabled: true
+
+csi:
+  # Install the ceph-csi-operator subchart (csi-operator.yaml in the kustomize route).
+  installCsiOperator: true

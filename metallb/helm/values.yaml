@@ -1,0 +1,6 @@
+# Values for the metallb chart (https://metallb.github.io/metallb), pinned in ../Makefile.
+# Mirrors overlays/install, which uses the upstream metallb-frr-k8s.yaml manifest.
+
+frrk8s:
+  # Use the bundled FRR-K8s subchart as the BGP backend (same as metallb-frr-k8s.yaml).
+  enabled: true

@@ -1,0 +1,14 @@
+---
+# csi-driver-iscsi has no controller (CreateVolume is unimplemented), so it cannot
+# provision volumes. This class only groups the hand-written iSCSI PVs so PVCs can
+# ask for them by name; every PV must already exist and set storageClassName: iscsi-static.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: iscsi-static
+provisioner: kubernetes.io/no-provisioner
+# Bind when a pod using the PVC is scheduled, the recommended mode for no-provisioner classes.
+volumeBindingMode: WaitForFirstConsumer
+# Only applies to dynamically provisioned PVs; the static PVs set their own Retain policy.
+reclaimPolicy: Retain
+allowVolumeExpansion: false

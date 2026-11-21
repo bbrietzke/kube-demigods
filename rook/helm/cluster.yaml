@@ -1,0 +1,26 @@
+# Values for the rook-ceph-cluster chart (https://charts.rook.io/release), pinned in ../Makefile.
+# Equivalent of cluster.yaml + the patches in overlays/install.
+# Pools and storage classes are NOT created here; `make demigods` applies them from base/.
+
+operatorNamespace: rook-ceph
+
+toolbox:
+  # Use `make toolbox` instead.
+  enabled: false
+
+cephClusterSpec:
+  security:
+    cephx:
+      # Nodes run Linux 7.0+, so drop the legacy `keyType: aes` and allow aes256k.
+      csi: null
+      allowedCiphers:
+        - aes256k
+  storage:
+    useAllNodes: true
+    useAllDevices: false
+    # Only consume the NVMe drive on each storage node.
+    deviceFilter: "^nvme0n1$"
+
+cephBlockPools: []
+cephFileSystems: []
+cephObjectStores: []

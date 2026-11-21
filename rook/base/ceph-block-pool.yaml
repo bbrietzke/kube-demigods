@@ -1,0 +1,12 @@
+---
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: ssd-pool
+  namespace: rook-ceph
+spec:
+  failureDomain: host
+  # Ceph auto-classes NVMe OSDs as "nvme", not "ssd".
+  deviceClass: nvme
+  replicated:
+    size: 3

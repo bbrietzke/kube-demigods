@@ -1,0 +1,8 @@
+# Cloudflare API token for cert-manager (see certificateManager/base/cloudflare.env.example)
+certificateManager/base/cloudflare.env
+
+# Helm charts that `kustomize build --enable-helm` downloads next to an overlay
+charts/
+
+# macOS Finder metadata
+.DS_Store

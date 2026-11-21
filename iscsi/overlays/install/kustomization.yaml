@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: iscsi-install-kustomization
+# csi-iscsi-node DaemonSet + iscsiadm wrapper ConfigMap (kube-system), same commit as prerequisites.
+# The nodes must have open-iscsi installed: the plugin runs the host's iscsiadm via chroot.
+resources:
+- https://raw.githubusercontent.com/kubernetes-csi/csi-driver-iscsi/ce838d03d752181cc05cbeef842681efa93ce995/deploy/csi-iscsi-node.yaml
+
+# Upstream only publishes a moving "canary" image; pin the build verified on the demigods (arm64).
+images:
+- name: gcr.io/k8s-staging-sig-storage/iscsiplugin
+  digest: sha256:8c4b250454357ae9e9472f02ffbd997bc0dce1a694d9000af26fb0fe1414ae0b
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
