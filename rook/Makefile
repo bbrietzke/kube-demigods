@@ -30,7 +30,7 @@ helm: ## Install the Rook operator and the CephCluster with Helm; waits for a Re
 		-n $(NAMESPACE) -f helm/cluster.yaml
 	$(wait_ceph)
 
-demigods: ## Apply the ssd-pool CephBlockPool and the rook-ceph-ssd StorageClass; waits for the pool
+demigods: ## Apply the ssd-pool CephBlockPool and the default rook-ceph StorageClass; waits for the pool
 	$(call kapply,overlays/demigods)
 	$(KUBECTL) -n $(NAMESPACE) wait cephblockpool/ssd-pool --for=jsonpath='{.status.phase}'=Ready --timeout=$(WAIT_TIMEOUT)
 

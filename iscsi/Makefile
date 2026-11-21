@@ -12,9 +12,9 @@ prerequisites: ## Register the iscsi.csi.k8s.io CSIDriver
 install: prerequisites ## Install the csi-iscsi-node DaemonSet (kube-system); waits for it on every node
 	$(call kinstall,overlays/install)
 
-demigods: ## Apply the iscsi-static StorageClass and the db-volume iSCSI PersistentVolumes
+demigods: ## Apply the iscsi-static StorageClass and any static iSCSI PVs listed in base/
 	@if [ -z "$$($(KUSTOMIZE) build overlays/demigods)" ]; then \
-		echo "base/db-volume*.yaml are empty; nothing to apply."; \
+		echo "overlays/demigods renders nothing; nothing to apply."; \
 	else \
 		$(KUSTOMIZE) build overlays/demigods | $(KUBECTL) apply --server-side --force-conflicts -f -; \
 	fi
