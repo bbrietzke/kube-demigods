@@ -9,6 +9,7 @@ include common.mk
 #   certificateManager   - cert-manager + letsencrypt-dns01 ClusterIssuer (needs the Gateway API CRDs)
 #   postgresql           - CloudNativePG operator (cluster00 is `make -C postgresql demigods`)
 #   harbor               - container registry; manual (`make -C harbor helm`), needs cluster00 + traefik postCertManager
+#   forgejo              - git forge + Actions runners; manual (`make -C forgejo helm runners`), needs cluster00 + traefik postCertManager
 #
 # Per-component targets: make -C <component> help
 
@@ -33,6 +34,7 @@ helm: ## Install every component with Helm where a chart exists (kustomize other
 	$(MAKE) -C postgresql helm
 
 uninstall: ## Tear down everything installed by `make install`
+	-$(MAKE) -C forgejo uninstall-helm
 	-$(MAKE) -C harbor uninstall-helm
 	-$(MAKE) -C postgresql uninstall
 	-$(MAKE) -C certificateManager uninstall
@@ -43,6 +45,7 @@ uninstall: ## Tear down everything installed by `make install`
 	-$(MAKE) -C metallb uninstall
 
 uninstall-helm: ## Tear down everything installed by `make helm`
+	-$(MAKE) -C forgejo uninstall-helm
 	-$(MAKE) -C harbor uninstall-helm
 	-$(MAKE) -C postgresql uninstall-helm
 	-$(MAKE) -C certificateManager uninstall-helm

@@ -1,0 +1,8 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forgejo
+  labels:
+    # Lets Forgejo's HTTPRoute attach to traefik-gateway (see traefik/helm/postCertManager.yaml).
+    demigods/traefik-gateway: allowed
