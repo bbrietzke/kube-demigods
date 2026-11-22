@@ -34,6 +34,7 @@ Standard targets (only where the component supports them):
 | traefik | chart 42.4.1 | Gateway API v1.7.0 CRDs | ✅ (kustomize inflates the chart) | ✅ | — | `postCertManager` (Helm route only) |
 | certificateManager | v1.21.3 | Gateway API CRDs (from traefik) | ✅ (upstream manifest, patched) | ✅ | Cloudflare token Secret + `letsencrypt-dns01` ClusterIssuer | |
 | postgresql | CloudNativePG v1.30.2 (chart 0.29.2) + Barman Cloud plugin v0.16.0 | — | ✅ (upstream manifests) | ✅ (plugin via kustomize) | `db` namespace + `cluster00` (3 instances on `rook-ceph`) + daily snapshot backup + WAL archive and weekly base backup to Backblaze B2 (key in git-ignored `postgresql/base/backblaze.env`) | `snapshot`, `b2backup`, `snapshots` (see `postgresql/README.md`) |
+| harbor | chart 1.19.4 running Harbor v2.16.0 images (first arm64 release) | `harbor` namespace, password Secrets, `harbor` DatabaseRole + Database (cluster00) | — | ✅ (Helm only) | — | `password` (see `harbor/README.md`) |
 
 ## Storage
 
@@ -57,10 +58,11 @@ Running `make install` (kustomize) or `make helm` at the repo root installs ever
 6. **certificateManager**: cert-manager and the `letsencrypt-dns01` DNS-01 issuer. Before running it, `cp certificateManager/base/cloudflare.env.example certificateManager/base/cloudflare.env` and fill in the Cloudflare API token. The file is git-ignored, and kustomize generates the Secret from it.
 7. **postgresql**: the CloudNativePG operator and the Barman Cloud plugin. The plugin uses cert-manager for its TLS, so it comes after certificateManager.
 
-The root targets stop there. Two more steps are manual:
+The root targets stop there. Three more steps are manual, in this order:
 
 - `make -C traefik postCertManager` switches the Gateway to HTTPS for `faultycloud.app`, using the `faultycloud-app-tls` certificate from `letsencrypt-dns01`. It needs the Helm route (`make -C traefik helm` or `make helm`) and certificateManager's `demigods` step.
 - `make -C postgresql demigods` creates `cluster00`, its backup schedules and the Backblaze B2 ObjectStore. First `cp postgresql/base/backblaze.env.example postgresql/base/backblaze.env` and fill in the B2 key. The file is git-ignored, and the target refuses to run without it. It waits up to `PG_TIMEOUT` (default 15m) for the cluster to be Ready, then for WAL archiving to B2, and takes the first B2 base backup if none exists.
+- `make -C harbor helm` installs Harbor at `https://harbor.faultycloud.app`, after `cluster00` and `traefik postCertManager`. It generates its own git-ignored passwords and creates a `harbor` DatabaseRole and Database for cluster00 without modifying cluster00 or the postgresql component (see `harbor/README.md`). The name must resolve to `192.168.5.60` on the LAN, including on the nodes, for pushes and pulls.
 
 After `postCertManager`, `traefik-gateway` has four listeners: `web` and `websecure` for `faultycloud.app`, plus `web-wildcard` and `websecure-wildcard` for `*.faultycloud.app`. A wildcard listener doesn't match the bare domain, hence the pairs. Both HTTPS listeners share the `faultycloud-app-tls` certificate, which covers both names. An HTTPRoute can attach only from a namespace labeled `demigods/traefik-gateway=allowed`:
 
@@ -85,6 +87,7 @@ Every `prerequisites`, `install` and `helm` target blocks until what it created 
 - **traefik**: waits for the Gateway to be `Programmed`.
 - **certificateManager**: waits until its webhook accepts the issuer config. `demigods` waits for the ClusterIssuer to be Ready (registered with Let's Encrypt).
 - **postgresql**: `install` / `helm` also wait for the Barman Cloud plugin. `demigods` waits until the webhook accepts `cluster00`, for the cluster to be Ready, and until every instance has the barman-cloud sidecar and `ContinuousArchiving` is `True`. `snapshot` and `b2backup` wait for the Backup to complete, up to `SNAPSHOT_WAIT` seconds (default 600).
+- **harbor**: `prerequisites` waits until the `harbor` DatabaseRole is applied with no error, then for the `harbor` Database. `helm` waits for every workload and for the HTTPRoute to be Accepted.
 
 Other timeouts default to `WAIT_TIMEOUT=300s`; override with, for example, `make install WAIT_TIMEOUT=10m`.
 
@@ -115,9 +118,14 @@ These are deliberate deviations from the pinned upstream manifests. Keep them wh
   - Barman Cloud sidecar env `AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION` = `when_required`, the plugin's workaround for S3-compatible stores (B2).
   - The B2 ScheduledBackup has `immediate: false`. `make demigods` takes the first base backup once the sidecars are up.
 
+- **harbor**:
+  - All images overridden to `v2.16.0` on chart 1.19.4 (built for 2.15.4, amd64-only images). Switch to the first 2.16 chart and drop the overrides.
+  - `maxOpenConns: 30` / `maxIdleConns: 5`, down from 900/100, so Harbor can't exhaust cluster00's 100 connections.
+
 ## Uninstalling
 `make uninstall` or `make uninstall-helm` tears everything down in reverse. Uninstalling removes CRDs, which deletes every object of those kinds. Some components lose data when uninstalled:
 
+- **harbor**: `uninstall-helm` removes the release only. The PVCs (image layers), the `harbor` namespace and its Secrets, and the `harbor` database and role in cluster00 are kept. The root `uninstall` targets remove Harbor before postgresql.
 - **postgresql**: deletes `cluster00`, its volumes (`rook-ceph` is `Delete`) and the `db` namespace. That includes **every Backup and VolumeSnapshot**, so the snapshot backups go too. The Backblaze B2 bucket is not touched, so the off-cluster backups survive. With no cluster archiving there any more, nothing prunes them.
 - **external-snapshotter**: deletes every VolumeSnapshot in the cluster.
 - **traefik**: both uninstall targets remove the Gateway API CRDs, which deletes every Gateway and HTTPRoute in the cluster. certificateManager also depends on those CRDs.
