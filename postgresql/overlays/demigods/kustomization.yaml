@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
 - ../../base
 - backup.yaml     # daily cold volume-snapshot ScheduledBackup
+- backup-b2.yaml  # weekly base backup to Backblaze B2 (WAL is archived continuously)
 
 labels:
   - pairs:
@@ -46,3 +47,15 @@ patches:
           className: rook-ceph-snapclass
           online: false
           snapshotOwnerReference: backup
+    # Off-cluster backups: the Barman Cloud plugin archives every WAL segment to Backblaze B2
+    # (ObjectStore "backblaze" in base/) and takes the plugin base backups (backup-b2.yaml).
+    # Together they allow point-in-time recovery. serverName is the folder under the bucket path;
+    # a cluster restored from B2 must archive under a NEW serverName (see README).
+    - op: add
+      path: /spec/plugins
+      value:
+        - name: barman-cloud.cloudnative-pg.io
+          isWALArchiver: true
+          parameters:
+            barmanObjectName: backblaze
+            serverName: cluster00

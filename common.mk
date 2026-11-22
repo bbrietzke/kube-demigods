@@ -20,7 +20,7 @@ WAIT_READY := $(ROOT_DIR)/hack/wait-ready.sh
 
 .PHONY: help
 help: ## Show the targets this component supports
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # $(call kapply,<overlay dir>) - build an overlay and server-side apply it.
 # Server-side apply avoids the 256KiB last-applied annotation limit hit by large CRDs.

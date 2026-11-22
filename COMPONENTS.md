@@ -8,7 +8,7 @@ Each component directory follows the same layout:
   overlays/prerequisites/  # upstream CRDs and common resources, pinned by tag
   overlays/install/        # upstream operator or controller
   overlays/demigods/       # base/ plus cluster patches
-  overlays/<extra>/        # backs an extra target (rook: toolbox, postgresql: snapshot)
+  overlays/<extra>/        # backs an extra target (rook: toolbox; postgresql: snapshot, b2backup, plugin-barman-cloud)
   helm/                    # values files for the Helm route
   README.md                # day-two operations, where a component has them
 ```
@@ -33,7 +33,7 @@ Standard targets (only where the component supports them):
 | iscsi | master @ `ce838d0` (image pinned by digest) | `CSIDriver` | node DaemonSet | no upstream chart | `iscsi-static` StorageClass + any static PVs in `base/` | see `iscsi/README.md`, `iscsi/SERVER-SETUP.md` |
 | traefik | chart 42.4.1 | Gateway API v1.7.0 CRDs | ✅ (kustomize inflates the chart) | ✅ | — | `postCertManager` (Helm route only) |
 | certificateManager | v1.21.3 | Gateway API CRDs (from traefik) | ✅ (upstream manifest, patched) | ✅ | Cloudflare token Secret + `letsencrypt-dns01` ClusterIssuer | |
-| postgresql | CloudNativePG v1.30.2 (chart 0.29.2) | — | ✅ (upstream manifest) | ✅ | `db` namespace + `cluster00` (3 instances on `rook-ceph`) + daily snapshot backup | `snapshot`, `snapshots` (see `postgresql/README.md`) |
+| postgresql | CloudNativePG v1.30.2 (chart 0.29.2) + Barman Cloud plugin v0.16.0 | — | ✅ (upstream manifests) | ✅ (plugin via kustomize) | `db` namespace + `cluster00` (3 instances on `rook-ceph`) + daily snapshot backup + WAL archive and weekly base backup to Backblaze B2 (key in git-ignored `postgresql/base/backblaze.env`) | `snapshot`, `b2backup`, `snapshots` (see `postgresql/README.md`) |
 
 ## Storage
 
@@ -55,12 +55,12 @@ Running `make install` (kustomize) or `make helm` at the repo root installs ever
 4. **iscsi**: the iSCSI CSI node driver and the `iscsi-static` StorageClass. It runs on the four workers only, because hercules is tainted `control-plane:NoSchedule`.
 5. **traefik**: Gateway API CRDs, Traefik and the `traefik-gateway` Gateway (HTTP only at this point).
 6. **certificateManager**: cert-manager and the `letsencrypt-dns01` DNS-01 issuer. Before running it, `cp certificateManager/base/cloudflare.env.example certificateManager/base/cloudflare.env` and fill in the Cloudflare API token. The file is git-ignored, and kustomize generates the Secret from it.
-7. **postgresql**: the CloudNativePG operator.
+7. **postgresql**: the CloudNativePG operator and the Barman Cloud plugin. The plugin uses cert-manager for its TLS, so it comes after certificateManager.
 
 The root targets stop there. Two more steps are manual:
 
 - `make -C traefik postCertManager` switches the Gateway to HTTPS for `faultycloud.app`, using the `faultycloud-app-tls` certificate from `letsencrypt-dns01`. It needs the Helm route (`make -C traefik helm` or `make helm`) and certificateManager's `demigods` step.
-- `make -C postgresql demigods` creates `cluster00` and its daily backup schedule. It waits up to `PG_TIMEOUT` (default 15m) for the cluster to be Ready.
+- `make -C postgresql demigods` creates `cluster00`, its backup schedules and the Backblaze B2 ObjectStore. First `cp postgresql/base/backblaze.env.example postgresql/base/backblaze.env` and fill in the B2 key. The file is git-ignored, and the target refuses to run without it. It waits up to `PG_TIMEOUT` (default 15m) for the cluster to be Ready, then for WAL archiving to B2, and takes the first B2 base backup if none exists.
 
 After `postCertManager`, `traefik-gateway` has four listeners: `web` and `websecure` for `faultycloud.app`, plus `web-wildcard` and `websecure-wildcard` for `*.faultycloud.app`. A wildcard listener doesn't match the bare domain, hence the pairs. Both HTTPS listeners share the `faultycloud-app-tls` certificate, which covers both names. An HTTPRoute can attach only from a namespace labeled `demigods/traefik-gateway=allowed`:
 
@@ -84,7 +84,7 @@ Every `prerequisites`, `install` and `helm` target blocks until what it created 
 - **iscsi**: `prerequisites` waits for the `CSIDriver` to exist. `install` waits for the node DaemonSet on every worker.
 - **traefik**: waits for the Gateway to be `Programmed`.
 - **certificateManager**: waits until its webhook accepts the issuer config. `demigods` waits for the ClusterIssuer to be Ready (registered with Let's Encrypt).
-- **postgresql**: `demigods` waits until the webhook accepts `cluster00`, then for the cluster to be Ready. `snapshot` waits for the Backup to complete, up to `SNAPSHOT_WAIT` seconds (default 600).
+- **postgresql**: `install` / `helm` also wait for the Barman Cloud plugin. `demigods` waits until the webhook accepts `cluster00`, for the cluster to be Ready, and until every instance has the barman-cloud sidecar and `ContinuousArchiving` is `True`. `snapshot` and `b2backup` wait for the Backup to complete, up to `SNAPSHOT_WAIT` seconds (default 600).
 
 Other timeouts default to `WAIT_TIMEOUT=300s`; override with, for example, `make install WAIT_TIMEOUT=10m`.
 
@@ -111,12 +111,14 @@ These are deliberate deviations from the pinned upstream manifests. Keep them wh
 - **iscsi**: pinned to a master commit, with the plugin image pinned by digest, because upstream only publishes a moving `canary` tag.
 - **postgresql**:
   - `shared_buffers: 256MB`. It must fit well inside the 2Gi memory limit.
-  - Cold (`online: false`) volume-snapshot backups, because there is no WAL archive.
+  - Cold (`online: false`) volume-snapshot backups. They were chosen when there was no WAL archive, and they stay self-contained, so a snapshot restore never needs B2. With B2 archiving in place they could switch to hot (`online: true`), which avoids fencing a standby.
+  - Barman Cloud sidecar env `AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION` = `when_required`, the plugin's workaround for S3-compatible stores (B2).
+  - The B2 ScheduledBackup has `immediate: false`. `make demigods` takes the first base backup once the sidecars are up.
 
 ## Uninstalling
 `make uninstall` or `make uninstall-helm` tears everything down in reverse. Uninstalling removes CRDs, which deletes every object of those kinds. Some components lose data when uninstalled:
 
-- **postgresql**: deletes `cluster00`, its volumes (`rook-ceph` is `Delete`) and the `db` namespace. That includes **every Backup and VolumeSnapshot**, so the backups go too.
+- **postgresql**: deletes `cluster00`, its volumes (`rook-ceph` is `Delete`) and the `db` namespace. That includes **every Backup and VolumeSnapshot**, so the snapshot backups go too. The Backblaze B2 bucket is not touched, so the off-cluster backups survive. With no cluster archiving there any more, nothing prunes them.
 - **external-snapshotter**: deletes every VolumeSnapshot in the cluster.
 - **traefik**: both uninstall targets remove the Gateway API CRDs, which deletes every Gateway and HTTPRoute in the cluster. certificateManager also depends on those CRDs.
 - **rook**: Rook does not wipe the OSD drives. Re-using them needs a manual wipe (see Rook's cleanupPolicy docs).
