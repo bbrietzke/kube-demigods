@@ -62,7 +62,20 @@ The root targets stop there. Two more steps are manual:
 - `make -C traefik postCertManager` switches the Gateway to HTTPS for `faultycloud.app`, using the `faultycloud-app-tls` certificate from `letsencrypt-dns01`. It needs the Helm route (`make -C traefik helm` or `make helm`) and certificateManager's `demigods` step.
 - `make -C postgresql demigods` creates `cluster00` and its daily backup schedule. It waits up to `PG_TIMEOUT` (default 15m) for the cluster to be Ready.
 
-The Gateway's listeners use Traefik's default `namespacePolicy`, which only accepts HTTPRoutes from the `traefik` namespace. Set `namespacePolicy` in `traefik/helm/postCertManager.yaml` before apps in other namespaces attach routes.
+After `postCertManager`, `traefik-gateway` has four listeners: `web` and `websecure` for `faultycloud.app`, plus `web-wildcard` and `websecure-wildcard` for `*.faultycloud.app`. A wildcard listener doesn't match the bare domain, hence the pairs. Both HTTPS listeners share the `faultycloud-app-tls` certificate, which covers both names. An HTTPRoute can attach only from a namespace labeled `demigods/traefik-gateway=allowed`:
+
+```sh
+kubectl label namespace <ns> demigods/traefik-gateway=allowed
+```
+
+```yaml
+# HTTPRoute in that namespace
+spec:
+  parentRefs: [{name: traefik-gateway, namespace: traefik}]
+  hostnames: ["app.faultycloud.app"]
+```
+
+A route from an unlabeled namespace, including `traefik` itself, is rejected with `Accepted=False (NotAllowedByListeners)`. Every plain-HTTP request is redirected to HTTPS with a `301`, keeping the host, path and query. Traefik does this on the `web` entrypoint before any route matches, so apps never serve over HTTP and their HTTPRoutes need no redirect filter. These settings are only in `traefik/helm/postCertManager.yaml`. The pre-certificate `helm/install.yaml` route still has a single apex HTTP listener.
 
 Every `prerequisites`, `install` and `helm` target blocks until what it created is ready, so targets can be chained (`make -C rook install demigods`). Ready means CRDs are Established and all Deployments, DaemonSets and StatefulSets have rolled out (see `hack/wait-ready.sh`). Some components add their own check:
 

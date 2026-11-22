@@ -14,8 +14,10 @@ Admin and internal apps must stay unreachable from outside.
 
 - Traefik (Helm route, chart 42.4.1) runs the `traefik-gateway` Gateway on MetalLB's `192.168.5.60`. That's a private address behind OpenWRT, so it can't be reached from the internet.
 - cert-manager issues Let's Encrypt certificates through DNS-01 with Cloudflare (`letsencrypt-dns01`).
-- **Existing limitation, which blocks multi-app hosting regardless of the tunnel:** both Gateway listeners (`web` and `websecure`) have `hostname: "faultycloud.app"`, and the certificate covers only that name. An HTTPRoute for `app.faultycloud.app` can't attach. Serving more than the bare domain needs wildcard listeners and a wildcard certificate, which DNS-01 supports.
-- The listeners use Traefik's default `namespacePolicy` (`from: Same`), so only HTTPRoutes in the `traefik` namespace can attach.
+- **Done 2026-11-21:**
+  - The Gateway now has apex and wildcard listeners (`faultycloud.app` and `*.faultycloud.app`, HTTP and HTTPS), and the `faultycloud-app-tls` certificate covers both names.
+  - HTTPRoutes attach only from namespaces labeled `demigods/traefik-gateway=allowed` (see COMPONENTS.md).
+  - Under the plan below, this Gateway becomes the **internal** one. It would move to `*.lan.faultycloud.app`, and its label selector would carry over to the internal Gateway.
 
 ## Options evaluated
 
@@ -93,7 +95,7 @@ Rough effort: **about half a day**.
 | 1 | In the Cloudflare Zero Trust dashboard: create a remotely-managed tunnel, copy its token, and add public hostnames `faultycloud.app` and `*.faultycloud.app` → `http(s)://traefik-public.traefik.svc:<port>`. The wildcard DNS CNAME to `<tunnel-id>.cfargotunnel.com` may need adding by hand. | owner | 15–20 min |
 | 2 | Traefik:<br>• add a `public` entrypoint (port), not exposed on the LoadBalancer<br>• turn the existing chart-managed Gateway into the internal one, with listeners `*.lan.faultycloud.app` (and the bare domain if it's wanted on the LAN)<br>• trust forwarded headers from the pod CIDR `10.253.0.0/23`, so apps see the real visitor IP from `CF-Connecting-IP` / `X-Forwarded-For`<br>Changes go in `traefik/helm/postCertManager.yaml`. | Claude | ~1 hr |
 | 3 | Add a `public` Gateway as a plain manifest (the chart's `gateway:` block only creates one) on the public entrypoint, with `*.faultycloud.app` listeners. Restrict its `allowedRoutes` to namespaces labeled `demigods/exposure: public`. | Claude | ~1 hr |
-| 4 | Certificates: wildcard `*.faultycloud.app` and `*.lan.faultycloud.app` through `letsencrypt-dns01`. | Claude | included above |
+| 4 | Certificates: `*.faultycloud.app` already exists (`faultycloud-app-tls`). Add `*.lan.faultycloud.app` for the internal Gateway through `letsencrypt-dns01`. | Claude | included above |
 | 5 | New `cloudflared/` component, installed after traefik and certificateManager:<br>• `cloudflare/cloudflared` Deployment, pinned version, arm64 confirmed<br>• 2 replicas with anti-affinity across workers<br>• `/ready` health checks and metrics<br>• token Secret generated from a git-ignored `cloudflared/base/cloudflared.env`<br>• `install` / `demigods` / `uninstall` targets, README, root `Makefile` and `COMPONENTS.md` updates | Claude | ~1 hr |
 | 6 | OpenWRT: add the `lan.faultycloud.app` dnsmasq entry. | owner | 5 min |
 | 7 | Test:<br>• a `whoami` app on the public Gateway is reachable from outside through the tunnel, with the real client IP in its headers<br>• an app on the internal Gateway is reachable on the LAN and **not** through the tunnel, even when requested with a public hostname<br>• the LAN wildcard name resolves and serves a valid certificate | both | ~30 min |

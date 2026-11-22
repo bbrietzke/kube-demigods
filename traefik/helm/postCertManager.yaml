@@ -16,23 +16,62 @@ experimental:
 
 gateway:
   enabled: true
-  # cert-manager's gateway-shim issues a certificate for each HTTPS listener
-  # and stores it in the Secret named in certificateRefs.
+  # cert-manager's gateway-shim issues a certificate for the HTTPS listeners and stores it in the
+  # Secret named in certificateRefs. Listeners sharing a Secret share one Certificate whose
+  # dnsNames are all their hostnames (here faultycloud.app and *.faultycloud.app, via DNS-01).
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-dns01
   defaultScope:  # @schema enum:["All", "None", null]; type:[string, null]; default: null
+  # A wildcard listener hostname does not match the bare domain, so each protocol has an apex
+  # listener and a wildcard listener.
+  #
+  # HTTPRoutes may attach from any namespace labeled demigods/traefik-gateway=allowed, e.g.
+  #   kubectl label namespace <ns> demigods/traefik-gateway=allowed
+  # Unlabeled namespaces (including traefik itself) cannot attach.
   listeners:
     web:
       port: 8000
       hostname: "faultycloud.app"
       protocol: HTTP
+      namespacePolicy: &routeNamespaces
+        from: Selector
+        selector:
+          matchLabels:
+            demigods/traefik-gateway: allowed
+    web-wildcard:
+      port: 8000
+      hostname: "*.faultycloud.app"
+      protocol: HTTP
+      namespacePolicy: *routeNamespaces
     websecure:
       port: 8443
       hostname: "faultycloud.app"
       protocol: HTTPS
+      namespacePolicy: *routeNamespaces
       certificateRefs:
         - kind: Secret
           name: faultycloud-app-tls
+    websecure-wildcard:
+      port: 8443
+      hostname: "*.faultycloud.app"
+      protocol: HTTPS
+      namespacePolicy: *routeNamespaces
+      certificateRefs:
+        - kind: Secret
+          name: faultycloud-app-tls
+
+# Redirect every plain-HTTP request on the web entrypoint (port 80) to HTTPS with a 301,
+# before any route matches. HTTPRoutes therefore never serve over HTTP, and they need no
+# redirect filter of their own. The HTTP listeners stay, so the redirect has a place to answer.
+# (Certificates come from DNS-01, so there is no HTTP-01 ACME traffic that needs plain HTTP.)
+ports:
+  web:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
 
 # @schema additionalProperties: false
 providers:
